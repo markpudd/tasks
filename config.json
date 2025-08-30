@@ -1,0 +1,22 @@
+{
+  "printer": {
+    "type": "usb",
+    "vendor_id": "0x04b8",
+    "product_id": "0x0202",
+    "host": "192.168.1.100",
+    "port": 9100,
+    "device": "/dev/ttyUSB0",
+    "baudrate": 9600
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-3.5-turbo"
+  },
+  "integrations": {
+    "gmail_enabled": false,
+    "google_tasks_enabled": false
+  },
+  "storage": {
+    "tasks_file": "tasks.json"
+  }
+}
