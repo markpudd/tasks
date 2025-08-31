@@ -728,20 +728,38 @@ class TaskManagerApp {
         
         // Bind task-specific event listeners
         this.tasks.forEach(task => {
-            document.getElementById(`task-${task.id}`).addEventListener('click', () => this.showTaskDetails(task));
-            
-            // Prevent status dropdown from triggering task details
+            // Status dropdown event listener
             const statusSelect = document.getElementById(`status-${task.id}`);
-            statusSelect.addEventListener('click', (e) => e.stopPropagation());
             statusSelect.addEventListener('change', (e) => 
                 this.updateTaskStatus(task.id, e.target.value));
             
-            // Prevent print button from triggering task details
+            // Print button event listener
             document.getElementById(`print-${task.id}`).addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.printTask(task.id);
             });
+            
+            // Delete button event listener
+            document.getElementById(`delete-${task.id}`).addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteTask(task.id, task.title);
+            });
+            
+            // View details button event listener
+            document.getElementById(`view-${task.id}`).addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showTaskDetails(task);
+            });
+            
+            // Checkbox event listener
+            document.getElementById(`checkbox-${task.id}`).addEventListener('change', (e) => {
+                e.stopPropagation();
+                this.updateBulkActions();
+            });
         });
+        
+        // Setup bulk action event listeners
+        this.setupBulkActionListeners();
     }
 
     renderTaskCard(task) {
@@ -766,8 +784,12 @@ class TaskManagerApp {
         
         return `
             <div class="col-md-6 col-lg-4">
-                <div class="card task-card" id="task-${task.id}" style="cursor: pointer;">
+                <div class="card task-card" id="task-${task.id}">
                     <div class="card-header d-flex justify-content-between align-items-start">
+                        <div class="form-check me-2">
+                            <input class="form-check-input task-checkbox" type="checkbox" 
+                                   id="checkbox-${task.id}" data-task-id="${task.id}">
+                        </div>
                         <div class="d-flex flex-wrap gap-1">
                             <span class="badge ${priorityClass}">${task.priority.toUpperCase()}</span>
                             <span class="badge ${categoryClass}">${task.category.toUpperCase()}</span>
@@ -777,8 +799,15 @@ class TaskManagerApp {
                                 <i class="bi bi-three-dots-vertical"></i>
                             </button>
                             <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="#" id="view-${task.id}">
+                                    <i class="bi bi-eye"></i> View Details
+                                </a></li>
                                 <li><a class="dropdown-item" href="#" id="print-${task.id}">
                                     <i class="bi bi-printer"></i> Print
+                                </a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item text-danger" href="#" id="delete-${task.id}">
+                                    <i class="bi bi-trash"></i> Delete
                                 </a></li>
                             </ul>
                         </div>
@@ -887,7 +916,170 @@ class TaskManagerApp {
         }
     }
 
-    showTaskDetails(task) {
+    async deleteTask(taskId, taskTitle) {
+        // Confirm deletion
+        const confirmMessage = `Are you sure you want to delete the task "${taskTitle}"?`;
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/tasks/${taskId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast('Success', 'Task deleted successfully', 'success');
+                // Remove task from local array
+                this.tasks = this.tasks.filter(task => task.id !== taskId);
+                this.renderTasks();
+                
+                // Emit socket update for other clients
+                if (window.socket) {
+                    window.socket.emit('task_deleted', { taskId });
+                }
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            console.error('Error deleting task:', error);
+            this.showToast('Error', 'Failed to delete task', 'danger');
+        }
+    }
+
+    setupBulkActionListeners() {
+        // Select All button
+        document.getElementById('selectAllBtn').addEventListener('click', () => {
+            const checkboxes = document.querySelectorAll('.task-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+            });
+            this.updateBulkActions();
+        });
+
+        // Clear Selection button  
+        document.getElementById('clearSelectionBtn').addEventListener('click', () => {
+            const checkboxes = document.querySelectorAll('.task-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            this.updateBulkActions();
+        });
+
+        // Bulk Delete button
+        document.getElementById('bulkDeleteBtn').addEventListener('click', () => {
+            this.bulkDeleteTasks();
+        });
+    }
+
+    updateBulkActions() {
+        const checkboxes = document.querySelectorAll('.task-checkbox');
+        const selectedCheckboxes = document.querySelectorAll('.task-checkbox:checked');
+        const selectedCount = selectedCheckboxes.length;
+        
+        // Update selected count
+        document.getElementById('selectedCount').textContent = selectedCount;
+        
+        // Show/hide bulk actions bar
+        const bulkActions = document.getElementById('bulkActions');
+        if (selectedCount > 0) {
+            bulkActions.classList.remove('d-none');
+        } else {
+            bulkActions.classList.add('d-none');
+        }
+        
+        // Update Select All button text
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        if (selectedCount === checkboxes.length && checkboxes.length > 0) {
+            selectAllBtn.innerHTML = '<i class="bi bi-check-all"></i> All Selected';
+            selectAllBtn.disabled = true;
+        } else {
+            selectAllBtn.innerHTML = '<i class="bi bi-check-all"></i> Select All';
+            selectAllBtn.disabled = false;
+        }
+    }
+
+    async bulkDeleteTasks() {
+        const selectedCheckboxes = document.querySelectorAll('.task-checkbox:checked');
+        const selectedTaskIds = Array.from(selectedCheckboxes).map(checkbox => checkbox.dataset.taskId);
+        
+        if (selectedTaskIds.length === 0) {
+            this.showToast('Error', 'No tasks selected', 'warning');
+            return;
+        }
+
+        const confirmMessage = `Are you sure you want to delete ${selectedTaskIds.length} selected task${selectedTaskIds.length > 1 ? 's' : ''}?`;
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        let successCount = 0;
+        let failureCount = 0;
+        const errors = [];
+
+        // Delete tasks one by one
+        for (const taskId of selectedTaskIds) {
+            try {
+                const response = await fetch(`/api/tasks/${taskId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    successCount++;
+                    // Remove task from local array
+                    this.tasks = this.tasks.filter(task => task.id !== taskId);
+                } else {
+                    failureCount++;
+                    errors.push(`Failed to delete task: ${data.error}`);
+                }
+            } catch (error) {
+                failureCount++;
+                errors.push(`Error deleting task: ${error.message}`);
+            }
+        }
+
+        // Update UI
+        this.renderTasks();
+        this.updateBulkActions();
+
+        // Show results
+        if (successCount > 0 && failureCount === 0) {
+            this.showToast('Success', `Successfully deleted ${successCount} task${successCount > 1 ? 's' : ''}`, 'success');
+        } else if (successCount > 0 && failureCount > 0) {
+            this.showToast('Partial Success', `Deleted ${successCount} task${successCount > 1 ? 's' : ''}, ${failureCount} failed`, 'warning');
+        } else {
+            this.showToast('Error', `Failed to delete all selected tasks`, 'danger');
+        }
+
+        // Emit socket update for other clients
+        if (window.socket && successCount > 0) {
+            window.socket.emit('tasks_updated');
+        }
+    }
+
+    showTaskDetails(taskOrId) {
+        // Handle both task object and task ID
+        let task;
+        if (typeof taskOrId === 'string') {
+            // It's a task ID, find the task object
+            task = this.tasks.find(t => t.id === taskOrId);
+            if (!task) {
+                console.error('Task not found:', taskOrId);
+                return;
+            }
+        } else {
+            // It's already a task object
+            task = taskOrId;
+        }
+        
         this.currentTask = task;
         
         const modalBody = document.getElementById('taskDetailsBody');

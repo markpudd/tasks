@@ -786,6 +786,170 @@ def delete_project(project_id):
             'error': str(e)
         }), 500
 
+@app.route('/api/import/google-tasks', methods=['POST'])
+@login_required
+def import_google_tasks():
+    """Import Google Tasks from JSON export"""
+    try:
+        user_id = session['user_id']
+        task_manager = get_task_manager(user_id)
+        
+        # Get the JSON data from the request
+        if not request.is_json:
+            return jsonify({
+                'success': False,
+                'error': 'Content-Type must be application/json'
+            }), 400
+            
+        export_data = request.get_json()
+        
+        if not export_data or 'tasks' not in export_data:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid export data format. Expected JSON with "tasks" array.'
+            }), 400
+        
+        # Process import
+        tasks = export_data.get('tasks', [])
+        imported_count = 0
+        skipped_count = 0
+        projects_created = 0
+        project_mapping = {}
+        errors = []
+        
+        # Group tasks by project for better organization
+        tasks_by_project = {}
+        for task in tasks:
+            project_key = f"{task.get('project', 'Imported Tasks')}:{task.get('category', 'work')}"
+            if project_key not in tasks_by_project:
+                tasks_by_project[project_key] = []
+            tasks_by_project[project_key].append(task)
+        
+        # Process each project
+        for project_key, project_tasks in tasks_by_project.items():
+            project_name, category = project_key.split(':', 1)
+            
+            # Create or get project
+            if project_key not in project_mapping:
+                category_enum = TaskCategory.WORK if category == 'work' else TaskCategory.WORK
+                existing_project = task_manager.project_manager.get_project_by_name(
+                    project_name, category_enum
+                )
+                
+                if existing_project:
+                    project_mapping[project_key] = existing_project.id
+                else:
+                    try:
+                        new_project = task_manager.project_manager.create_project(
+                            name=project_name,
+                            category=category_enum,
+                            description=f"Imported from Google Tasks"
+                        )
+                        project_mapping[project_key] = new_project.id
+                        projects_created += 1
+                    except Exception as e:
+                        errors.append(f"Failed to create project {project_name}: {str(e)}")
+                        continue
+            
+            project_id = project_mapping.get(project_key)
+            
+            # Import tasks for this project
+            for task_data in project_tasks:
+                try:
+                    title = task_data.get('title', 'Untitled Task')
+                    task_id = task_data.get('id', f"gtask_{hash(title)}")
+                    
+                    # Skip if task already exists
+                    if task_manager.get_task(task_id):
+                        skipped_count += 1
+                        continue
+                    
+                    # Check for similar tasks
+                    similar_exists = False
+                    for existing_task in task_manager.get_all_tasks():
+                        if (existing_task.title.lower().strip() == title.lower().strip() and 
+                            'google_tasks' in existing_task.metadata.get('source', '')):
+                            similar_exists = True
+                            break
+                    
+                    if similar_exists:
+                        skipped_count += 1
+                        continue
+                    
+                    # Parse due date
+                    due_date = None
+                    if task_data.get('due_date'):
+                        try:
+                            due_date = datetime.fromisoformat(task_data['due_date'].replace('Z', '+00:00'))
+                        except:
+                            pass
+                    
+                    # Convert priority and status
+                    priority_map = {
+                        'low': TaskPriority.LOW,
+                        'medium': TaskPriority.MEDIUM,
+                        'high': TaskPriority.HIGH,
+                        'urgent': TaskPriority.URGENT
+                    }
+                    priority = priority_map.get(task_data.get('priority', 'medium').lower(), TaskPriority.MEDIUM)
+                    
+                    status_map = {
+                        'pending': TaskStatus.PENDING,
+                        'in_progress': TaskStatus.IN_PROGRESS,
+                        'completed': TaskStatus.COMPLETED,
+                        'cancelled': TaskStatus.CANCELLED
+                    }
+                    status = status_map.get(task_data.get('status', 'pending').lower(), TaskStatus.PENDING)
+                    
+                    category_enum = TaskCategory.WORK if category == 'work' else TaskCategory.PERSONAL
+                    
+                    # Create task
+                    task = task_manager.create_task(
+                        title=title,
+                        description=task_data.get('description', ''),
+                        priority=priority,
+                        category=category_enum,
+                        project_id=project_id,
+                        due_date=due_date,
+                        tags=task_data.get('tags', [])
+                    )
+                    
+                    # Update metadata
+                    if hasattr(task, 'metadata'):
+                        task.metadata.update(task_data.get('metadata', {}))
+                    
+                    # Update status if completed
+                    if status == TaskStatus.COMPLETED:
+                        task_manager.update_task_status(task.id, TaskStatus.COMPLETED)
+                    
+                    imported_count += 1
+                    
+                except Exception as e:
+                    errors.append(f"Failed to import task '{task_data.get('title', 'Unknown')}': {str(e)}")
+                    continue
+        
+        # Emit update to connected clients
+        socketio.emit('tasks_updated')
+        
+        result = {
+            'success': True,
+            'imported_count': imported_count,
+            'skipped_count': skipped_count,
+            'projects_created': projects_created,
+            'total_tasks': len(tasks)
+        }
+        
+        if errors:
+            result['errors'] = errors
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @socketio.on('connect')
 def handle_connect():
     print('Client connected')
