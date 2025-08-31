@@ -1,0 +1,72 @@
+[
+  {
+    "id": "1805ab47-fd44-4af4-991f-e596c9dad4f5",
+    "name": "General",
+    "category": "work",
+    "description": "General work tasks",
+    "created_at": "2025-08-31T06:39:59.630547+00:00"
+  },
+  {
+    "id": "948d8677-c24b-415c-8591-1feb1ad12d76",
+    "name": "Development",
+    "category": "work",
+    "description": "Software development projects",
+    "created_at": "2025-08-31T06:39:59.630588+00:00"
+  },
+  {
+    "id": "9c00acc5-fea6-439e-90bf-3b17b72a903c",
+    "name": "Meetings",
+    "category": "work",
+    "description": "Meeting-related tasks",
+    "created_at": "2025-08-31T06:39:59.630597+00:00"
+  },
+  {
+    "id": "ba2dc3e7-2108-4dc0-a358-6f517a8f8cfc",
+    "name": "Administration",
+    "category": "work",
+    "description": "Administrative tasks",
+    "created_at": "2025-08-31T06:39:59.630603+00:00"
+  },
+  {
+    "id": "796571ea-00ec-4667-9888-19bf8f66fa01",
+    "name": "Home",
+    "category": "personal",
+    "description": "Home and household tasks",
+    "created_at": "2025-08-31T06:39:59.630609+00:00"
+  },
+  {
+    "id": "799e88ec-55f3-4422-a37d-b24c0f873a14",
+    "name": "Health",
+    "category": "personal",
+    "description": "Health and fitness related tasks",
+    "created_at": "2025-08-31T06:39:59.630614+00:00"
+  },
+  {
+    "id": "26f7c423-d616-45a9-a4ef-64fc9cdbdaf1",
+    "name": "Learning",
+    "category": "personal",
+    "description": "Personal learning and education",
+    "created_at": "2025-08-31T06:39:59.630620+00:00"
+  },
+  {
+    "id": "17fb171b-38ed-487c-8772-ca3db6313a56",
+    "name": "Hobbies",
+    "category": "personal",
+    "description": "Hobby and recreational activities",
+    "created_at": "2025-08-31T06:39:59.630625+00:00"
+  },
+  {
+    "id": "17f33063-572f-4513-83e4-8699ea6531a5",
+    "name": "DFXCore",
+    "category": "personal",
+    "description": null,
+    "created_at": "2025-08-31T06:48:42.312678+00:00"
+  },
+  {
+    "id": "dd1c4751-9468-4aaa-a54c-bc5256a801b1",
+    "name": "TestProjhect",
+    "category": "personal",
+    "description": null,
+    "created_at": "2025-08-31T06:49:20.786441+00:00"
+  }
+]

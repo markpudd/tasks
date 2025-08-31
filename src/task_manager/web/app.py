@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ..core import TaskManager, Task, TaskStatus, TaskPriority, TaskCategory
 from ..core.auth import UserManager, User
+from ..core.project_manager import ProjectManager
 from ..printer import ReceiptPrinter
 from ..llm import OpenAILLM, GeminiLLM
 from ..integrations import GmailIntegration, GoogleTasksIntegration
@@ -263,6 +264,7 @@ def create_task():
             priority=TaskPriority[data.get('priority', 'MEDIUM').upper()],
             category=TaskCategory[data.get('category', 'PERSONAL').upper()],
             project=data.get('project'),
+            project_id=data.get('project_id'),
             due_date=due_date,
             tags=data.get('tags', [])
         )
@@ -559,22 +561,6 @@ def get_statistics():
             'error': str(e)
         }), 500
 
-@app.route('/api/projects')
-@login_required
-def get_projects():
-    try:
-        user_id = session['user_id']
-        task_manager = get_task_manager(user_id)
-        projects = task_manager.get_all_projects()
-        return jsonify({
-            'success': True,
-            'projects': projects
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
 @app.route('/api/categories')
 def get_categories():
@@ -645,6 +631,161 @@ def gtasks_sync():
         }), 500
 
 # WebSocket events
+# Project management routes
+@app.route('/api/projects', methods=['GET'])
+@login_required
+def get_projects():
+    try:
+        user_id = session['user_id']
+        task_manager = get_task_manager(user_id)
+        
+        # Get projects organized by category
+        project_options = task_manager.get_project_options()
+        
+        return jsonify({
+            'success': True,
+            'projects': project_options
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/tasks/hierarchical', methods=['GET'])
+@login_required
+def get_hierarchical_tasks():
+    try:
+        user_id = session['user_id']
+        task_manager = get_task_manager(user_id)
+        
+        # Get tasks organized hierarchically
+        hierarchical_tasks = task_manager.get_hierarchical_tasks()
+        
+        # Format for frontend - hierarchical_tasks now has structure {project_name: {project: {...}, tasks: [...]}}
+        formatted_structure = {}
+        for category, projects in hierarchical_tasks.items():
+            formatted_structure[category] = {}
+            for project_name, project_data in projects.items():
+                # Extract project info and tasks from new structure
+                project_info = project_data['project']
+                tasks = project_data['tasks']
+                
+                formatted_structure[category][project_name] = {
+                    'project': project_info,
+                    'tasks': []
+                }
+                
+                for task in tasks:
+                    task_dict = task.to_dict()
+                    task_dict['created_at_formatted'] = task.created_at.strftime('%Y-%m-%d %H:%M')
+                    task_dict['updated_at_formatted'] = task.updated_at.strftime('%Y-%m-%d %H:%M')
+                    if task.due_date:
+                        task_dict['due_date_formatted'] = task.due_date.strftime('%Y-%m-%d %H:%M')
+                    formatted_structure[category][project_name]['tasks'].append(task_dict)
+        
+        return jsonify({
+            'success': True,
+            'structure': formatted_structure
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/projects', methods=['POST'])
+@login_required
+def create_project():
+    try:
+        user_id = session['user_id']
+        task_manager = get_task_manager(user_id)
+        data = request.get_json()
+        
+        category = TaskCategory[data['category'].upper()]
+        project = task_manager.project_manager.create_project(
+            name=data['name'],
+            category=category,
+            description=data.get('description')
+        )
+        
+        # Emit real-time update
+        socketio.emit('project_created', {
+            'project': {
+                'id': project.id,
+                'name': project.name,
+                'category': project.category.value,
+                'description': project.description
+            }
+        })
+
+        return jsonify({
+            'success': True,
+            'project': {
+                'id': project.id,
+                'name': project.name,
+                'category': project.category.value,
+                'description': project.description
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/projects/<project_id>', methods=['DELETE'])
+@login_required
+def delete_project(project_id):
+    try:
+        user_id = session['user_id']
+        task_manager = get_task_manager(user_id)
+        
+        # Get the project before deleting to send in event
+        project = task_manager.project_manager.get_project(project_id)
+        if not project:
+            return jsonify({
+                'success': False,
+                'error': 'Project not found'
+            }), 404
+        
+        # Handle tasks assigned to this project - reassign to General or unassign
+        tasks_with_project = task_manager.get_tasks_by_project_id(project_id)
+        for task in tasks_with_project:
+            task.project_id = None
+            task.project = None
+        
+        if tasks_with_project:
+            task_manager.save_tasks()
+        
+        # Delete the project
+        success = task_manager.project_manager.delete_project(project_id)
+        
+        if success:
+            # Emit real-time update
+            socketio.emit('project_deleted', {
+                'project_id': project_id,
+                'project_name': project.name,
+                'tasks_affected': len(tasks_with_project)
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': f'Project "{project.name}" deleted successfully',
+                'tasks_affected': len(tasks_with_project)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to delete project'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @socketio.on('connect')
 def handle_connect():
     print('Client connected')

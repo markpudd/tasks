@@ -24,10 +24,71 @@
 </div>
 
 <!-- Main Content Tabs -->
+<ul class="nav nav-tabs mb-4" id="mainTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="folder-tab" data-bs-toggle="tab" data-bs-target="#folderContent" type="button">
+            <i class="bi bi-folder"></i> Folder View
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="all-tasks-tab" data-bs-toggle="tab" data-bs-target="#tasksContent" type="button">
+            <i class="bi bi-list"></i> All Tasks
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="ai-tab" data-bs-toggle="tab" data-bs-target="#aiContent" type="button">
+            <i class="bi bi-robot"></i> AI Assistant
+        </button>
+    </li>
+</ul>
+
 <div class="tab-content" id="mainTabContent">
     
-    <!-- Tasks Tab -->
-    <div class="tab-pane fade show active" id="tasksContent">
+    <!-- Folder View Tab -->
+    <div class="tab-pane fade show active" id="folderContent">
+        <div class="row">
+            <!-- Work Section -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-briefcase"></i> Work
+                        </h5>
+                        <button class="btn btn-light btn-sm add-project-btn" data-category="work" title="Add Work Project">
+                            <i class="bi bi-plus-circle"></i> Add Project
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="workProjectsContainer">
+                            <!-- Work projects will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Personal Section -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-house"></i> Personal
+                        </h5>
+                        <button class="btn btn-light btn-sm add-project-btn" data-category="personal" title="Add Personal Project">
+                            <i class="bi bi-plus-circle"></i> Add Project
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="personalProjectsContainer">
+                            <!-- Personal projects will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- All Tasks Tab -->
+    <div class="tab-pane fade" id="tasksContent">
         
         <!-- Filters and Search -->
         <div class="row mb-3">

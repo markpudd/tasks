@@ -6,12 +6,15 @@ class TaskManagerApp {
         this.tasks = [];
         this.currentTask = null;
         this.currentFilter = { status: '', priority: '', category: '', project: '', tag: '' };
-        this.projects = [];
+        this.projects = { work: [], personal: [] };
         this.currentUser = null;
+        this.lastCreatedProject = null;
         
         this.initializeSocketIO();
         this.bindEventListeners();
         this.loadCurrentUser();
+        this.loadProjects();
+        this.loadHierarchicalTasks();
     }
 
     initializeSocketIO() {
@@ -30,18 +33,21 @@ class TaskManagerApp {
         this.socket.on('task_created', (data) => {
             this.showToast('Task Created', `Task "${data.task.title}" was created`, 'success');
             this.loadTasks();
+            this.loadHierarchicalTasks();
             this.loadStatistics();
         });
 
         this.socket.on('task_updated', (data) => {
             this.showToast('Task Updated', `Task "${data.task.title}" was updated`, 'info');
             this.loadTasks();
+            this.loadHierarchicalTasks();
             this.loadStatistics();
         });
 
         this.socket.on('task_deleted', (data) => {
             this.showToast('Task Deleted', 'A task was deleted', 'warning');
             this.loadTasks();
+            this.loadHierarchicalTasks();
             this.loadStatistics();
         });
 
@@ -53,14 +59,80 @@ class TaskManagerApp {
             this.loadTasks();
             this.loadStatistics();
         });
+
+        this.socket.on('project_created', (data) => {
+            // Only show notification and reload if this wasn't triggered by current user
+            if (this.lastCreatedProject !== data.project.id) {
+                this.showToast('Project Created', `Project "${data.project.name}" was created by another user`, 'info');
+                setTimeout(() => {
+                    this.loadProjects();
+                    this.loadHierarchicalTasks();
+                }, 500);
+            }
+        });
+
+        this.socket.on('project_deleted', (data) => {
+            const message = data.tasks_affected > 0 
+                ? `Project "${data.project_name}" was deleted and ${data.tasks_affected} tasks moved to General`
+                : `Project "${data.project_name}" was deleted`;
+            
+            this.showToast('Project Deleted', message, 'warning');
+            
+            // Reload all relevant views
+            setTimeout(() => {
+                this.loadProjects();
+                this.loadHierarchicalTasks();
+                this.loadTasks();
+            }, 500);
+        });
     }
 
     bindEventListeners() {
+        // Tab switching
+        document.getElementById('folder-tab').addEventListener('click', () => {
+            this.loadHierarchicalTasks();
+        });
+        
+        document.getElementById('all-tasks-tab').addEventListener('click', () => {
+            this.loadTasks();
+        });
+
         // Create Task Modal
         document.getElementById('createTaskBtn').addEventListener('click', () => this.createTask());
         document.getElementById('createTaskForm').addEventListener('submit', (e) => {
             e.preventDefault();
             this.createTask();
+        });
+        
+        // Refresh project dropdown when create task modal is shown
+        const createTaskModal = document.getElementById('createTaskModal');
+        createTaskModal.addEventListener('shown.bs.modal', () => {
+            console.log('Create task modal shown, refreshing projects...');
+            this.updateProjectDropdowns();
+        });
+
+        // Create Project Modal
+        document.getElementById('createProjectBtn').addEventListener('click', () => this.createProject());
+        document.getElementById('createProjectForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.createProject();
+        });
+
+        // Add Project Buttons
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.add-project-btn')) {
+                const button = e.target.closest('.add-project-btn');
+                const category = button.dataset.category;
+                this.showCreateProjectModal(category);
+            }
+            
+            // Delete Project Buttons
+            if (e.target.closest('.delete-project-btn')) {
+                const button = e.target.closest('.delete-project-btn');
+                const projectId = button.dataset.projectId;
+                const projectName = button.dataset.projectName;
+                this.deleteProject(projectId, projectName);
+            }
         });
 
         // Search and Filter
@@ -128,6 +200,514 @@ class TaskManagerApp {
             this.showToast('Error', 'Failed to load tasks', 'danger');
         } finally {
             this.hideLoading('tasksLoading');
+        }
+    }
+
+    async loadHierarchicalTasks() {
+        try {
+            const response = await fetch('/api/tasks/hierarchical');
+            const data = await response.json();
+            
+            if (data.success) {
+                this.renderHierarchicalTasks(data.structure);
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            console.error('Error loading hierarchical tasks:', error);
+            this.showToast('Error', 'Failed to load folder structure', 'danger');
+        }
+    }
+
+    async loadProjects() {
+        try {
+            console.log('Loading projects...');
+            const response = await fetch('/api/projects');
+            const data = await response.json();
+            
+            console.log('Projects API response:', data);
+            
+            if (data.success) {
+                this.projects = data.projects;
+                console.log('Projects loaded:', this.projects);
+                this.updateProjectDropdowns();
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            console.error('Error loading projects:', error);
+            this.showToast('Error', 'Failed to load projects', 'danger');
+        }
+    }
+
+    updateProjectDropdowns() {
+        console.log('Updating project dropdowns with projects:', this.projects);
+        
+        // Update create task modal dropdown
+        const workOptions = document.getElementById('workProjectOptions');
+        const personalOptions = document.getElementById('personalProjectOptions');
+        
+        console.log('Found DOM elements:', { workOptions: !!workOptions, personalOptions: !!personalOptions });
+        
+        if (workOptions) {
+            console.log('Work projects data:', this.projects.work);
+            workOptions.innerHTML = (this.projects.work || [])
+                .map(project => `<option value="${project.id}">${project.name}</option>`)
+                .join('');
+            console.log('Work options updated:', workOptions.innerHTML);
+        }
+        
+        if (personalOptions) {
+            console.log('Personal projects data:', this.projects.personal);
+            personalOptions.innerHTML = (this.projects.personal || [])
+                .map(project => `<option value="${project.id}">${project.name}</option>`)
+                .join('');
+            console.log('Personal options updated:', personalOptions.innerHTML);
+        }
+        
+        // Update filter dropdown
+        const projectFilter = document.getElementById('projectFilter');
+        if (projectFilter) {
+            const currentValue = projectFilter.value;
+            projectFilter.innerHTML = '<option value="">All Projects</option>';
+            
+            // Add work projects
+            if (this.projects.work && this.projects.work.length > 0) {
+                const workGroup = document.createElement('optgroup');
+                workGroup.label = 'Work Projects';
+                this.projects.work.forEach(project => {
+                    const option = document.createElement('option');
+                    option.value = project.name;  // Filter uses project name for backward compatibility
+                    option.textContent = project.name;
+                    workGroup.appendChild(option);
+                });
+                projectFilter.appendChild(workGroup);
+            }
+            
+            // Add personal projects
+            if (this.projects.personal && this.projects.personal.length > 0) {
+                const personalGroup = document.createElement('optgroup');
+                personalGroup.label = 'Personal Projects';
+                this.projects.personal.forEach(project => {
+                    const option = document.createElement('option');
+                    option.value = project.name;  // Filter uses project name for backward compatibility
+                    option.textContent = project.name;
+                    personalGroup.appendChild(option);
+                });
+                projectFilter.appendChild(personalGroup);
+            }
+            
+            // Restore previous selection
+            projectFilter.value = currentValue;
+            const totalProjects = (this.projects.work?.length || 0) + (this.projects.personal?.length || 0);
+            console.log('Project filter updated with', totalProjects, 'projects');
+        }
+    }
+
+    renderHierarchicalTasks(structure) {
+        this.renderCategoryTasks('work', structure.work, 'workProjectsContainer');
+        this.renderCategoryTasks('personal', structure.personal, 'personalProjectsContainer');
+    }
+
+    renderCategoryTasks(category, projects, containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        let html = '';
+        
+        for (const [projectName, projectData] of Object.entries(projects)) {
+            // Show all projects, even empty ones
+            const project = projectData.project;
+            const tasks = projectData.tasks;
+            
+            const taskCount = tasks.length;
+            const completedCount = tasks.filter(t => t.status === 'completed').length;
+            const pendingCount = tasks.filter(t => t.status === 'pending').length;
+            const inProgressCount = tasks.filter(t => t.status === 'in_progress').length;
+            
+            html += `
+                <div class="accordion mb-3" id="${category}Projects">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header">
+                            <button class="accordion-button collapsed" type="button" 
+                                    data-bs-toggle="collapse" 
+                                    data-bs-target="#${category}_${projectName.replace(/\s+/g, '_')}" 
+                                    aria-expanded="false">
+                                <div class="d-flex justify-content-between w-100 me-3">
+                                    <span>
+                                        <i class="bi bi-folder"></i> ${projectName}
+                                    </span>
+                                    <span class="badge bg-secondary">${taskCount}</span>
+                                </div>
+                            </button>
+                        </h2>
+                        <div id="${category}_${projectName.replace(/\s+/g, '_')}" 
+                             class="accordion-collapse collapse">
+                            <div class="accordion-body">
+                                <div class="row mb-3">
+                                    <div class="col-8">
+                                        <small class="text-muted">
+                                            ${completedCount} completed • 
+                                            ${inProgressCount} in progress • 
+                                            ${pendingCount} pending
+                                        </small>
+                                    </div>
+                                    <div class="col-4 text-end">
+                                        <button class="btn btn-sm btn-outline-primary view-folder-btn me-2" 
+                                                data-project="${projectName}" 
+                                                data-category="${category}"
+                                                title="View all tasks in this folder">
+                                            <i class="bi bi-arrow-right-circle"></i> View Folder
+                                        </button>
+                                        ${project.id ? `
+                                            <button class="btn btn-sm btn-outline-danger delete-project-btn" 
+                                                    data-project-id="${project.id}" 
+                                                    data-project-name="${project.name}"
+                                                    title="Delete this project">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <div class="list-group list-group-flush">
+                                    ${tasks.length === 0 ? `
+                                        <div class="list-group-item text-center text-muted">
+                                            <i class="bi bi-inbox"></i>
+                                            <div class="mt-2">
+                                                <small>No tasks in this project yet</small>
+                                                <br>
+                                                <small>Create a task and assign it to this project</small>
+                                            </div>
+                                        </div>
+                                    ` : `
+                                        ${tasks.slice(0, 3).map(task => this.renderTaskListItem(task)).join('')}
+                                        ${tasks.length > 3 ? `
+                                            <div class="list-group-item text-center text-muted">
+                                                <small>... and ${tasks.length - 3} more tasks</small>
+                                            </div>
+                                        ` : ''}
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        if (html === '') {
+            // Show empty state with prominent add project button
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="bi bi-folder-plus display-1 text-muted"></i>
+                    <h6 class="text-muted mt-2">No projects in ${category}</h6>
+                    <p class="text-muted small">Create your first project to organize your ${category} tasks</p>
+                    <button class="btn btn-outline-primary btn-sm add-project-btn" data-category="${category}">
+                        <i class="bi bi-plus-circle"></i> Create ${category.charAt(0).toUpperCase() + category.slice(1)} Project
+                    </button>
+                </div>
+            `;
+        } else {
+            container.innerHTML = html;
+        }
+        
+        // Bind event listeners for task items
+        this.bindTaskListItemEvents(containerId);
+    }
+
+    renderTaskListItem(task) {
+        const priorityIcons = {
+            'low': 'bi-arrow-down text-success',
+            'medium': 'bi-dash text-warning',
+            'high': 'bi-arrow-up text-danger',
+            'urgent': 'bi-exclamation-triangle text-danger'
+        };
+        
+        const statusColors = {
+            'pending': 'text-muted',
+            'in_progress': 'text-primary',
+            'completed': 'text-success',
+            'cancelled': 'text-danger'
+        };
+        
+        const priorityIcon = priorityIcons[task.priority] || 'bi-dash';
+        const statusColor = statusColors[task.status] || 'text-muted';
+        
+        return `
+            <div class="list-group-item list-group-item-action task-list-item" 
+                 data-task-id="${task.id}" 
+                 style="cursor: pointer;">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1 ${task.status === 'completed' ? 'text-decoration-line-through' : ''}">
+                        <i class="bi ${priorityIcon}"></i>
+                        ${task.title}
+                    </h6>
+                    <small class="${statusColor}">
+                        ${task.status.replace('_', ' ')}
+                    </small>
+                </div>
+                ${task.description ? `<p class="mb-1 small text-muted">${task.description.length > 100 ? task.description.substring(0, 100) + '...' : task.description}</p>` : ''}
+                <small class="text-muted">
+                    ${task.due_date ? `Due: ${task.due_date_formatted} • ` : ''}
+                    Created: ${task.created_at_formatted}
+                </small>
+            </div>
+        `;
+    }
+
+    bindTaskListItemEvents(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const taskItems = container.querySelectorAll('.task-list-item');
+        taskItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                const taskId = item.dataset.taskId;
+                this.showTaskDetails(taskId);
+            });
+        });
+        
+        // Bind view folder buttons
+        const viewFolderButtons = container.querySelectorAll('.view-folder-btn');
+        viewFolderButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const projectName = button.dataset.project;
+                const category = button.dataset.category;
+                this.viewFolderTasks(projectName, category);
+            });
+        });
+    }
+
+    viewFolderTasks(projectName, category) {
+        // Switch to "All Tasks" tab
+        const allTasksTab = document.getElementById('all-tasks-tab');
+        const allTasksContent = document.getElementById('tasksContent');
+        const folderContent = document.getElementById('folderContent');
+        
+        // Activate the All Tasks tab
+        document.getElementById('folder-tab').classList.remove('active');
+        allTasksTab.classList.add('active');
+        folderContent.classList.remove('show', 'active');
+        allTasksContent.classList.add('show', 'active');
+        
+        // Set filters
+        this.currentFilter.project = projectName;
+        this.currentFilter.category = category;
+        this.currentFilter.status = '';
+        this.currentFilter.priority = '';
+        this.currentFilter.tag = '';
+        
+        // Update filter UI
+        document.getElementById('categoryFilter').value = category;
+        document.getElementById('projectFilter').value = projectName;
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('priorityFilter').value = '';
+        
+        // Load tasks with filters
+        this.loadTasks();
+        
+        // Show toast to inform user
+        this.showToast('Folder View', `Showing all tasks in ${projectName} (${category})`, 'info');
+        
+        // Add a "Back to Folders" button
+        this.addBackToFoldersButton(projectName, category);
+    }
+
+    addBackToFoldersButton(projectName, category) {
+        const tasksContainer = document.getElementById('tasksContainer');
+        if (!tasksContainer) return;
+        
+        // Remove existing back button if any
+        const existingButton = document.getElementById('backToFoldersBtn');
+        if (existingButton) {
+            existingButton.remove();
+        }
+        
+        // Create back button
+        const backButton = document.createElement('div');
+        backButton.id = 'backToFoldersBtn';
+        backButton.className = 'alert alert-info alert-dismissible fade show mb-3';
+        backButton.innerHTML = `
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <i class="bi bi-folder-open"></i>
+                    <strong>Viewing folder:</strong> ${projectName} (${category})
+                </div>
+                <div>
+                    <button type="button" class="btn btn-sm btn-outline-primary me-2" id="backToFoldersAction">
+                        <i class="bi bi-arrow-left"></i> Back to Folders
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clearFiltersAction">
+                        <i class="bi bi-x-circle"></i> Show All Tasks
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Insert at the top of tasks container
+        tasksContainer.parentNode.insertBefore(backButton, tasksContainer);
+        
+        // Bind events
+        document.getElementById('backToFoldersAction').addEventListener('click', () => {
+            this.backToFolders();
+        });
+        
+        document.getElementById('clearFiltersAction').addEventListener('click', () => {
+            this.clearAllFilters();
+        });
+    }
+
+    backToFolders() {
+        // Switch back to Folder View tab
+        const folderTab = document.getElementById('folder-tab');
+        const folderContent = document.getElementById('folderContent');
+        const allTasksContent = document.getElementById('tasksContent');
+        
+        // Activate the Folder tab
+        document.getElementById('all-tasks-tab').classList.remove('active');
+        folderTab.classList.add('active');
+        allTasksContent.classList.remove('show', 'active');
+        folderContent.classList.add('show', 'active');
+        
+        // Clear filters
+        this.clearAllFilters();
+        
+        // Remove back button
+        const backButton = document.getElementById('backToFoldersBtn');
+        if (backButton) {
+            backButton.remove();
+        }
+        
+        // Reload hierarchical view
+        this.loadHierarchicalTasks();
+    }
+
+    clearAllFilters() {
+        // Clear filters
+        this.currentFilter = { status: '', priority: '', category: '', project: '', tag: '' };
+        
+        // Update filter UI
+        document.getElementById('categoryFilter').value = '';
+        document.getElementById('projectFilter').value = '';
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('priorityFilter').value = '';
+        document.getElementById('searchInput').value = '';
+        
+        // Remove back button
+        const backButton = document.getElementById('backToFoldersBtn');
+        if (backButton) {
+            backButton.remove();
+        }
+        
+        // Reload tasks
+        this.loadTasks();
+    }
+
+    showCreateProjectModal(category) {
+        // Set the category in the modal
+        document.getElementById('projectCategory').value = category;
+        
+        // Clear form
+        document.getElementById('createProjectForm').reset();
+        document.getElementById('projectCategory').value = category;
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('createProjectModal'));
+        modal.show();
+        
+        // Focus on name input
+        setTimeout(() => {
+            document.getElementById('projectName').focus();
+        }, 300);
+    }
+
+    async createProject() {
+        const name = document.getElementById('projectName').value.trim();
+        const description = document.getElementById('projectDescription').value.trim();
+        const category = document.getElementById('projectCategory').value;
+
+        if (!name) {
+            this.showToast('Error', 'Project name is required', 'danger');
+            return;
+        }
+
+        if (!category) {
+            this.showToast('Error', 'Please select a category', 'danger');
+            return;
+        }
+
+        try {
+            const projectData = {
+                name,
+                description: description || null,
+                category
+            };
+
+            const response = await fetch('/api/projects', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(projectData)
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Clear form
+                document.getElementById('createProjectForm').reset();
+                
+                // Hide modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('createProjectModal'));
+                modal.hide();
+                
+                this.showToast('Success', `Project "${name}" created successfully`, 'success');
+                
+                // Reload projects and hierarchical view immediately
+                await this.loadProjects();
+                await this.loadHierarchicalTasks();
+                
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            console.error('Error creating project:', error);
+            this.showToast('Error', `Failed to create project: ${error.message}`, 'danger');
+        }
+    }
+
+    async deleteProject(projectId, projectName) {
+        // Confirm deletion
+        const confirmMessage = `Are you sure you want to delete the project "${projectName}"?\n\nAny tasks assigned to this project will be moved to "General".`;
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/projects/${projectId}`, {
+                method: 'DELETE'
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showToast('Success', data.message, 'success');
+                
+                // Reload projects and hierarchical view immediately
+                await this.loadProjects();
+                await this.loadHierarchicalTasks();
+                
+                // Also reload tasks in case we're viewing the all tasks list
+                await this.loadTasks();
+                
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (error) {
+            console.error('Error deleting project:', error);
+            this.showToast('Error', `Failed to delete project: ${error.message}`, 'danger');
         }
     }
 
@@ -231,7 +811,7 @@ class TaskManagerApp {
         const description = document.getElementById('taskDescription').value.trim();
         const priority = document.getElementById('taskPriority').value;
         const category = document.getElementById('taskCategory').value;
-        const project = document.getElementById('taskProject').value.trim();
+        const projectId = document.getElementById('taskProject').value.trim();
         const dueDate = document.getElementById('taskDueDate').value;
         const tags = document.getElementById('taskTags').value.trim().split(',')
             .map(tag => tag.trim()).filter(tag => tag.length > 0);
@@ -247,7 +827,7 @@ class TaskManagerApp {
                 description: description || null,
                 priority,
                 category,
-                project: project || null,
+                project_id: projectId || null,
                 due_date: dueDate || null,
                 tags
             };
@@ -801,11 +1381,11 @@ class TaskManagerApp {
             projectFilter.removeChild(projectFilter.lastChild);
         }
         
-        // Add project options
-        this.projects.forEach(project => {
+        // Add project options from both work and personal categories
+        [...(this.projects.work || []), ...(this.projects.personal || [])].forEach(project => {
             const option = document.createElement('option');
-            option.value = project;
-            option.textContent = project;
+            option.value = project.name;
+            option.textContent = project.name;
             projectFilter.appendChild(option);
         });
     }

@@ -4,6 +4,30 @@ from enum import Enum
 from pydantic import BaseModel, Field
 import uuid
 
+class ProjectFolder(BaseModel):
+    """Represents a project folder in the hierarchical structure"""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    category: 'TaskCategory'  # Work or Personal
+    description: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category.value,
+            "description": self.description,
+            "created_at": self.created_at.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProjectFolder":
+        folder_data = data.copy()
+        folder_data["category"] = TaskCategory(folder_data["category"])
+        folder_data["created_at"] = datetime.fromisoformat(folder_data["created_at"])
+        return cls(**folder_data)
+
 class TaskStatus(Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -27,7 +51,8 @@ class Task(BaseModel):
     status: TaskStatus = TaskStatus.PENDING
     priority: TaskPriority = TaskPriority.MEDIUM
     category: TaskCategory = TaskCategory.PERSONAL
-    project: Optional[str] = None
+    project: Optional[str] = None  # Now stores project folder name for backward compatibility
+    project_id: Optional[str] = None  # New field for project folder ID
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     due_date: Optional[datetime] = None
@@ -57,6 +82,7 @@ class Task(BaseModel):
             "priority": self.priority.value,
             "category": self.category.value,
             "project": self.project,
+            "project_id": self.project_id,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "due_date": self.due_date.isoformat() if self.due_date else None,
