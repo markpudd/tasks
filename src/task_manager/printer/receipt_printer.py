@@ -169,54 +169,39 @@ class ReceiptPrinter:
         return final_img
     
     def _print_task_text_fallback(self, task: Task) -> bool:
-        """Fallback text printing method if bitmap fails"""
+        """Fallback text printing method matching the new format"""
         try:
-            # Print task header
+            # Header
             self.printer.set(align="center", bold=True, width=2, height=2)
-            self.printer.text("TASK CARD\n")
-            self.printer.text("=" * 32 + "\n")
+            self.printer.text("TASK CARD\n\n")
             
-            # Task title - Much bigger text
-            self.printer.set(align="center", bold=True, width=3, height=3)
-            self.printer.text(f"{task.title}\n")
+            # Top separator line
+            self.printer.text("=" * 32 + "\n\n")
             
-            # Category and priority icons - larger and more prominent
-            category_icon = "🏢" if task.category.value == "WORK" else "🏠"
-            priority_icon = "⚡" if task.priority.value == "HIGH" else ""
+            # Task title - Very large text
+            self.printer.set(align="center", bold=True, width=4, height=4)
+            self.printer.text(f"{task.title}\n\n")
             
-            # Icons line with multiple icons for visibility
-            self.printer.set(align="center", bold=False, width=2, height=2)
-            icon_line = f"{category_icon}  {category_icon}  {category_icon}"
-            if priority_icon:
-                icon_line += f"  {priority_icon}  {priority_icon}  {priority_icon}"
-            icon_line += "\n"
-            self.printer.text(icon_line)
+            # Bottom separator line
+            self.printer.set(align="center", bold=True, width=1, height=1)
+            self.printer.text("=" * 32 + "\n\n")
             
-            # Project name if exists
-            if hasattr(task, 'project') and task.project:
-                self.printer.set(align="center", bold=True, width=1, height=1)
-                self.printer.text(f"📁 Project: {task.project}\n")
+            # Bottom section with category, due date, and priority
+            category_icon = "🏢" if task.category.value == "WORK" else "👤"
             
-            self.printer.text("=" * 32 + "\n")
-            
-            # Task description
-            if task.description:
-                self.printer.set(align="left", bold=False)
-                self.printer.text(f"Description:\n{task.description}\n")
-                self.printer.text("-" * 32 + "\n")
-            
-            # Task details
-            self.printer.set(align="left", bold=False)
-            self.printer.text(f"📊 Status: {task.status.value.title()}\n")
-            self.printer.text(f"📅 Created: {task.created_at.strftime('%Y-%m-%d %H:%M')}\n")
+            # Create bottom line elements
+            bottom_line = category_icon
             
             if task.due_date:
-                self.printer.text(f"⏰ Due: {task.due_date.strftime('%Y-%m-%d %H:%M')}\n")
+                due_text = f"DUE: {task.due_date.strftime('%d %b %Y')}"
+                bottom_line += f"  {due_text}"
             
-            if task.tags:
-                self.printer.text(f"🏷️  Tags: {', '.join(task.tags)}\n")
+            if task.priority.value == "HIGH":
+                bottom_line += "  ⚠️"
             
-            self.printer.text("=" * 32 + "\n")
+            self.printer.set(align="center", bold=False, width=1, height=1)
+            self.printer.text(f"{bottom_line}\n")
+            
             self.printer.cut()
             
             logger.info(f"Successfully printed task (text fallback): {task.title}")
