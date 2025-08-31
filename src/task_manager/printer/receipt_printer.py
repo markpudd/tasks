@@ -44,14 +44,36 @@ class ReceiptPrinter:
     
     def _get_default_font(self, size: int = 14) -> ImageFont.ImageFont:
         """Get a default font, falling back to system fonts if needed"""
+        import platform
+        system = platform.system().lower()
+        
         try:
-            # Try to use a nice system font
-            return ImageFont.truetype("/System/Library/Fonts/Arial.ttf", size)
-        except:
-            try:
+            if system == "darwin":  # macOS
+                return ImageFont.truetype("/System/Library/Fonts/Arial.ttf", size)
+            elif system == "linux":
+                # Try common Linux font paths
+                linux_fonts = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+                ]
+                for font_path in linux_fonts:
+                    try:
+                        return ImageFont.truetype(font_path, size)
+                    except:
+                        continue
+            elif system == "windows":
                 return ImageFont.truetype("arial.ttf", size)
-            except:
-                return ImageFont.load_default()
+        except:
+            pass
+        
+        # Final fallback
+        try:
+            return ImageFont.truetype("arial.ttf", size)
+        except:
+            return ImageFont.load_default()
     
     def _create_task_bitmap(self, task: Task) -> Image.Image:
         """Create a bitmap image for the task card in the specified format"""
@@ -63,10 +85,18 @@ class ReceiptPrinter:
         img = Image.new('RGB', (width, estimated_height), 'white')
         draw = ImageDraw.Draw(img)
         
-        # Fonts
-        title_font = self._get_default_font(48)  # Even larger for main title
-        header_font = self._get_default_font(24)
-        due_font = self._get_default_font(20)
+        # Fonts - larger sizes for Linux compatibility
+        import platform
+        system = platform.system().lower()
+        
+        if system == "linux":
+            title_font = self._get_default_font(64)  # Much larger for Linux
+            header_font = self._get_default_font(32)
+            due_font = self._get_default_font(28)
+        else:
+            title_font = self._get_default_font(48)  # Original sizes for other systems
+            header_font = self._get_default_font(24)
+            due_font = self._get_default_font(20)
         
         y_pos = 20
         margin = 20
@@ -171,22 +201,25 @@ class ReceiptPrinter:
     def _print_task_text_fallback(self, task: Task) -> bool:
         """Fallback text printing method matching the new format"""
         try:
-            # Header
-            self.printer.set(align="center", bold=True, width=2, height=2)
+            # Header - larger for Linux
+            self.printer.set(align="center", bold=True, width=3, height=3)
             self.printer.text("TASK CARD\n\n")
             
-            # Top separator line
-            self.printer.text("=" * 32 + "\n\n")
+            # Top separator line - make it more prominent
+            self.printer.set(align="center", bold=True, width=2, height=2)
+            self.printer.text("=" * 20 + "\n")
+            self.printer.text("=" * 20 + "\n\n")
             
-            # Task title - Very large text
-            self.printer.set(align="center", bold=True, width=4, height=4)
+            # Task title - Maximum size for Linux thermal printers
+            self.printer.set(align="center", bold=True, width=8, height=8)
             self.printer.text(f"{task.title}\n\n")
             
-            # Bottom separator line
-            self.printer.set(align="center", bold=True, width=1, height=1)
-            self.printer.text("=" * 32 + "\n\n")
+            # Bottom separator line - make it more prominent
+            self.printer.set(align="center", bold=True, width=2, height=2)
+            self.printer.text("=" * 20 + "\n")
+            self.printer.text("=" * 20 + "\n\n")
             
-            # Bottom section with category, due date, and priority
+            # Bottom section with category, due date, and priority - larger
             category_icon = "🏢" if task.category.value == "WORK" else "👤"
             
             # Create bottom line elements
@@ -199,7 +232,7 @@ class ReceiptPrinter:
             if task.priority.value == "HIGH":
                 bottom_line += "  ⚠️"
             
-            self.printer.set(align="center", bold=False, width=1, height=1)
+            self.printer.set(align="center", bold=True, width=2, height=2)
             self.printer.text(f"{bottom_line}\n")
             
             self.printer.cut()
